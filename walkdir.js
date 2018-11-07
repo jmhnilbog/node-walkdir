@@ -1,6 +1,8 @@
 var EventEmitter = require('events').EventEmitter,
-fs = require('fs'),
-_path = require('path');
+_fs = require('fs'),
+_path = require('path'),
+sep = _path.sep||'/';// 0.6.x
+
 
 module.exports = walkdir;
 
@@ -19,8 +21,11 @@ function walkdir(path,options,cb){
   if(typeof options == 'function') cb = options;
 
   options = options || {};
+  
+  var fs = options.fs || _fs;
 
   var emitter = new EventEmitter(),
+  dontTraverse = [],
   allPaths = (options.return_object?{}:[]),
   resolved = false,
   inos = {},
@@ -41,6 +46,12 @@ function walkdir(path,options,cb){
       });
     }
   }, tick = 0;
+
+  emitter.ignore = function(path){
+    if(Array.isArray(path)) dontTraverse.push.apply(dontTraverse,path)
+    else dontTraverse.push(path)
+    return this
+  }
 
   //mapping is stat functions to event names.	
   var statIs = [['isFile','file'],['isDirectory','directory'],['isSymbolicLink','link'],['isSocket','socket'],['isFIFO','fifo'],['isBlockDevice','blockdevice'],['isCharacterDevice','characterdevice']];
@@ -63,8 +74,12 @@ function walkdir(path,options,cb){
 
 
       //if i have evented this inode already dont again.
-      if(inos[stat.dev+'-'+stat.ino] && stat.ino) return;
-      inos[stat.dev+'-'+stat.ino] = 1;
+      var fileName = _path.basename(path);
+      var fileKey = stat.dev + '-' + stat.ino + '-' + fileName;
+      if(options.track_inodes !== false) {
+        if(inos[fileKey] && stat.ino) return;
+        inos[fileKey] = 1;
+      }
 
       if (first && stat.isDirectory()) {
         emitter.emit('targetdirectory',path,stat,depth);
@@ -106,6 +121,15 @@ function walkdir(path,options,cb){
       return;
     }
 
+    if(dontTraverse.length){
+      for(var i=0;i<dontTraverse.length;++i){
+        if(dontTraverse[i] == path) {
+          dontTraverse.splice(i,1)
+          return;
+        }
+      }
+    }
+
     job(1);
     var readdirAction = function(err,files) {
       job(-1);
@@ -121,12 +145,13 @@ function walkdir(path,options,cb){
         return;     
       }
 
-      if(path == '/') path='';
+      if(path == sep) path='';
       for(var i=0,j=files.length;i<j;i++){
-        statter(path+'/'+files[i],false,(depth||0)+1);
+        statter(path+sep+files[i],false,(depth||0)+1);
       }
 
     };
+
 
     //use same pattern for sync as async api
     if(options.sync) {
